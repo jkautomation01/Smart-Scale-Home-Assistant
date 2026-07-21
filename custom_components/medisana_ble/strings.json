@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a Medisana BLE scale",
+        "description": "Pick your scale from the list of Bluetooth devices Home Assistant has recently seen, or type its MAC address in manually if it isn't listed yet (the scale usually only advertises briefly right after a weigh-in).",
+        "data": {
+          "address": "Bluetooth address",
+          "name": "Name"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Add Medisana scale",
+        "description": "Do you want to set up {name}?"
+      }
+    },
+    "abort": {
+      "already_configured": "This scale is already configured.",
+      "no_devices_found": "No unconfigured Medisana scales were found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Medisana BLE scale options",
+        "description": "Map the scale's built-in user slots (1-8, set on the scale itself) to names, so readings show up as sensors. Leave a slot blank to ignore it.",
+        "data": {
+          "use_2010_epoch": "Scale clock uses 2010-01-01 epoch",
+          "person_name_1": "Person slot 1 name",
+          "person_name_2": "Person slot 2 name",
+          "person_name_3": "Person slot 3 name",
+          "person_name_4": "Person slot 4 name",
+          "person_name_5": "Person slot 5 name",
+          "person_name_6": "Person slot 6 name",
+          "person_name_7": "Person slot 7 name",
+          "person_name_8": "Person slot 8 name"
+        }
+      }
+    }
+  }
+}
