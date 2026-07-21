@@ -36,6 +36,7 @@ from .const import (
     MAX_PERSON_SLOTS,
     MEASUREMENT_TIMEOUT,
     MIN_RECONNECT_INTERVAL,
+    QUIET_PERIOD,
     SIGNAL_MEDISANA_DATA,
 )
 from .parser import BodyRecord, PersonRecord, WeightRecord, parse_body, parse_person, parse_weight, sanitize_timestamp
@@ -134,14 +135,18 @@ class MedisanaBLECoordinator:
                 _LOGGER.debug("Weight payload from %s: %s", self.address, data.hex())
                 record = parse_weight(bytes(data))
                 if record is not None:
-                    weights[record.person_id] = record
+                    existing = weights.get(record.person_id)
+                    if existing is None or record.timestamp > existing.timestamp:
+                        weights[record.person_id] = record
                     received.set()
 
             def _on_body(_: Any, data: bytearray) -> None:
                 _LOGGER.debug("Body payload from %s: %s", self.address, data.hex())
                 record = parse_body(bytes(data))
                 if record is not None:
-                    bodies[record.person_id] = record
+                    existing = bodies.get(record.person_id)
+                    if existing is None or record.timestamp > existing.timestamp:
+                        bodies[record.person_id] = record
                     received.set()
 
             try:
@@ -177,9 +182,27 @@ class MedisanaBLECoordinator:
         bodies: dict[int, BodyRecord],
         received: asyncio.Event,
     ) -> None:
-        while not (weights and bodies and weights.keys() & bodies.keys()):
-            received.clear()
-            await received.wait()
+        """Wait out the scale's replay burst, then confirm we have a pair.
+
+        The scale sends its stored history as a burst of notifications, not
+        just the latest reading, so stopping at the first weight+body match
+        can return a stale record instead of the current weigh-in. Instead,
+        wait for QUIET_PERIOD seconds of silence (no new notification) so
+        the whole burst has arrived, keeping only the highest-timestamped
+        record per person (see _on_weight/_on_body), then finish once at
+        least one person has both a weight and a body-composition record.
+        """
+        while True:
+            try:
+                await asyncio.wait_for(received.wait(), timeout=QUIET_PERIOD)
+            except asyncio.TimeoutError:
+                if weights and bodies and weights.keys() & bodies.keys():
+                    return
+                # No data of any kind yet - keep waiting for the burst to
+                # start; the outer MEASUREMENT_TIMEOUT bounds the total wait.
+                continue
+            else:
+                received.clear()
 
     def _async_process_results(
         self,

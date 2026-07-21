@@ -33,6 +33,13 @@ GENDER_LABELS = {1: "male", 2: "female"}
 ACTIVITY_LABELS = {0: "normal", 3: "high"}
 
 MIN_RECONNECT_INTERVAL = 20  # seconds, debounce reconnect on repeat adverts
-MEASUREMENT_TIMEOUT = 30  # seconds to wait for a full reading after connect
+MEASUREMENT_TIMEOUT = 30  # hard cap on time to wait for a reading after connect
+
+# The scale replays its stored measurement history (up to ~30 past
+# records) on every connection, not just the latest weigh-in. We keep
+# listening until this many seconds pass with no new notification before
+# treating the burst as finished, then pick the record with the highest
+# timestamp per person - that's the actual current weigh-in.
+QUIET_PERIOD = 3
 
 SIGNAL_MEDISANA_DATA = "medisana_ble_data_{entry_id}"

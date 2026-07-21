@@ -87,8 +87,11 @@ def parse_body(data: bytes) -> BodyRecord | None:
     """Parse a body-composition payload.
 
     Layout (16 bytes): [0]=0x6F marker, [1:5]=timestamp (LE uint32),
-    [5]=person id, [6:16]=5x uint16 (LE) each *10 and masked with 0x0FFF:
-    kcal, fat%, water%, muscle%, bone mass (kg).
+    [5]=person id, [6:16]=5x uint16 (LE) masked with 0x0FFF: kcal (whole
+    units), then fat%, water%, muscle%, bone mass (kg) each scaled *10.
+    kcal is NOT scaled - confirmed against a real BS436 (dividing it by 10
+    like the percentage fields produced an implausible ~210 kcal BMR
+    instead of the correct ~2100 kcal).
     """
     if len(data) < 16 or data[0] != 0x6F:
         _LOGGER.debug("Ignoring unexpected body payload: %s", data.hex())
@@ -99,7 +102,7 @@ def parse_body(data: bytes) -> BodyRecord | None:
     return BodyRecord(
         person_id=person_id,
         timestamp=timestamp,
-        kcal=(kcal & 0x0FFF) / 10.0,
+        kcal=float(kcal & 0x0FFF),
         fat_percent=(fat & 0x0FFF) / 10.0,
         water_percent=(water & 0x0FFF) / 10.0,
         muscle_percent=(muscle & 0x0FFF) / 10.0,
