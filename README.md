@@ -1,11 +1,32 @@
-# Medisana BLE Scale for Home Assistant
+# Smart Scale + Weight Coach for Home Assistant
 
-A custom Home Assistant **integration** (not a Supervisor add-on) that talks
-directly to a Medisana BS4xx-family Bluetooth smart scale — including the
-**Medisana BS436** — over BLE, using whatever Bluetooth adapter or ESPHome
-Bluetooth proxy you've already configured in Home Assistant.
+Two custom Home Assistant **integrations** (not Supervisor add-ons):
 
-## Why an integration and not an add-on
+- **[Medisana BLE Scale](#medisana-ble-scale)** — talks directly to a
+  Medisana BS4xx-family Bluetooth smart scale over BLE, using whatever
+  Bluetooth adapter or ESPHome Bluetooth proxy you've already configured in
+  Home Assistant.
+- **[Weight Coach](#weight-coach)** — a weight-loss/maintenance/gain coach
+  built on top of any weight sensor (defaults to the Medisana one above, but
+  works with any `device_class: weight` sensor): trend smoothing, milestones,
+  and a suggested daily-calorie target that adapts over time.
+
+They're deliberately separate: the scale driver stays a simple, stable data
+source, and the coach is reusable with any weight sensor.
+
+> **HACS note**: this repo has two `custom_components/` folders (one per
+> integration above). HACS's "Integration" category is generally built
+> around one integration per repository, so a HACS custom-repository add may
+> only reliably discover/install one of them, or need to be added twice.
+> Manual installation (copy the folder you want into
+> `config/custom_components/`) always works for either one regardless.
+
+## Medisana BLE Scale
+
+Connects to a Medisana BS4xx-family scale — including the **Medisana
+BS436** — over BLE.
+
+### Why an integration and not an add-on
 
 Add-ons run in their own isolated Docker container and don't share Home
 Assistant's Bluetooth stack. Integrations run inside Home Assistant core and
@@ -13,7 +34,7 @@ can reuse the adapters/proxies already set up under **Settings → Devices &
 Services → Bluetooth**. Since the goal was "use the Bluetooth adapter I've
 already configured in Home Assistant," this is built as an integration.
 
-## How it works
+### How it works
 
 The scale doesn't stream data continuously — it wakes up and advertises over
 BLE for a short window right after someone weighs in. This integration:
@@ -39,20 +60,16 @@ leave "Scale clock uses 2010-01-01 epoch" turned **off** in the
 integration's options, or the `measured_at` attribute will show a date
 decades in the future.
 
-## Installation
+### Installation
 
-### HACS (custom repository)
+**HACS (custom repository)**: HACS → Integrations → ⋮ → Custom repositories
+→ add this repository's URL, category "Integration" → install "Medisana BLE
+Scale" → restart Home Assistant.
 
-1. HACS → Integrations → ⋮ → Custom repositories.
-2. Add this repository's URL, category "Integration".
-3. Install "Medisana BLE Scale", then restart Home Assistant.
-
-### Manual
-
-Copy `custom_components/medisana_ble/` into your Home Assistant
+**Manual**: copy `custom_components/medisana_ble/` into your Home Assistant
 `config/custom_components/` directory, then restart Home Assistant.
 
-## Setup
+### Setup
 
 1. Make sure a Bluetooth adapter (or an [ESPHome Bluetooth proxy][proxy]) is
    already configured under **Settings → Devices & Services → Bluetooth**,
@@ -83,7 +100,7 @@ Copy `custom_components/medisana_ble/` into your Home Assistant
    scale's title (e.g. "BS436") in **Settings → Entities**, then add them to
    a dashboard/area as you would any other sensor.
 
-## Troubleshooting
+### Troubleshooting
 
 Turn on debug logging:
 
@@ -110,10 +127,92 @@ within the next ~30 seconds. Also double check you're actually looking at
 the right entities (see step 6 above) — a successful reading updates the
 sensors silently, it doesn't notify you.
 
+## Weight Coach
+
+A weight-loss/maintenance/gain coach layered on top of any weight sensor.
+One config entry per coached person.
+
+### What it does
+
+- **Trend weight**: daily readings are noisy (water, food, sodium), so goals
+  are tracked against a smoothed trend line (continuous-time exponential
+  moving average, ~7-day time constant), not the raw daily number.
+- **Actual weekly rate + projected end date**: a 21-day trailing regression
+  of the trend line gives a real rate of change, projected forward to when
+  you'll hit your goal weight.
+- **Milestones**: your start→goal change is split into equal steps (4 by
+  default), each with its own projected date, so progress feels concrete
+  instead of one distant end date.
+- **Suggested daily calorie target**: starts from a BMR (Mifflin-St Jeor,
+  using your current trend weight) × activity-level TDEE estimate, sized to
+  your goal rate. Two tiers, so it never breaks if you skip logging:
+  - **With enough logged calorie-intake days** (10+ of the last 21 - doesn't
+    need to be every day): back-calculates your *real* TDEE from the
+    energy-balance identity (intake vs. actual trend change), which is more
+    accurate than any formula.
+  - **Otherwise**: falls back to comparing your actual trend rate against
+    your goal rate and nudges the formula-based target accordingly. This is
+    the always-available path - zero logged days still gets you sane advice.
+  - Either way, a suggestion never auto-applies. Press **Accept Suggested
+    Target** to make it the active target; that's also what the next
+    recalibration is measured against.
+- **Manual weight entry**: if the automatic weight sensor doesn't update for
+  any reason (BLE connection failure, out of range, etc.), there's a
+  fallback number entity that feeds the exact same trend/history pipeline.
+
+### Installation
+
+Same as above: HACS custom repository, or copy
+`custom_components/weight_coach/` into `config/custom_components/`, then
+restart Home Assistant.
+
+### Setup
+
+1. **Settings → Devices & Services → Add Integration → Weight Coach**.
+2. Pick the weight sensor to coach against (any `device_class: weight`
+   sensor - e.g. one of the Medisana BLE Scale sensors above).
+3. Confirm sex/age/height - prefilled automatically if the source sensor
+   already reports them (the Medisana integration's Weight sensor does, as
+   attributes).
+4. Pick a goal type (lose/maintain/gain), goal weight, target weekly rate,
+   and how many milestones to split the journey into.
+5. Pick an activity level (prefilled with a guess if the source sensor
+   reports one, always adjustable).
+
+### Entities
+
+| Entity | What it's for |
+|---|---|
+| `number.*_goal_weight` | Your target weight - editable any time |
+| `number.*_goal_weekly_rate` | Target pace (kg/week; negative = losing) |
+| `number.*_calories_consumed_today` | Log today's total calorie intake once, at day's end |
+| `number.*_manual_weight_entry` | Fallback weigh-in entry if the automatic sensor doesn't update |
+| `select.*_activity_level` | Sedentary → very active, drives the TDEE estimate |
+| `sensor.*_trend_weight` | Smoothed weight trend |
+| `sensor.*_actual_weekly_rate` | Real rate of change from the last ~3 weeks |
+| `sensor.*_projected_end_date` | Projected date to reach your goal weight |
+| `sensor.*_next_milestone` | Next unreached milestone weight (full list + dates in attributes) |
+| `sensor.*_tdee_estimate` | Current TDEE estimate (`tdee_source` attribute shows formula vs. logged-intake) |
+| `sensor.*_active_calorie_target` | The calorie target you're currently following |
+| `sensor.*_suggested_calorie_target` | What the coach currently recommends - press the button to adopt it |
+| `button.*_accept_suggested_target` | Promotes the suggested target to active |
+
+### Notes
+
+- Trend/rate/projection/milestone sensors read "unavailable" for the first
+  few days - there isn't enough history yet for a reliable trend or slope.
+  That's expected.
+- The two-tier calorie system is intentionally forgiving: skip logging
+  intake for a week and nothing breaks, it just keeps using the
+  outcome-based fallback until enough days are logged again.
+- History (readings, intake, and the calorie-target adjustment log) is
+  stored in Home Assistant's own storage, not the recorder - so it survives
+  regardless of your recorder retention settings.
+
 ## Credits
 
-- Protocol reverse-engineering: [keptenkurk/BS440][bs440]
-- ESPHome component this was requested to be based on:
+- Medisana BLE protocol reverse-engineering: [keptenkurk/BS440][bs440]
+- ESPHome component the Medisana integration was requested to be based on:
   [bwynants/weegschaal][weegschaal]
 
 [bs440]: https://github.com/keptenkurk/BS440

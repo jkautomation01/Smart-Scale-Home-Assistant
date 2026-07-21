@@ -1,0 +1,10 @@
+{
+  "domain": "weight_coach",
+  "name": "Weight Coach",
+  "codeowners": ["@jkautomation01"],
+  "config_flow": true,
+  "documentation": "https://github.com/jkautomation01/smart-scale-home-assistant",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/jkautomation01/smart-scale-home-assistant/issues",
+  "version": "0.1.0"
+}

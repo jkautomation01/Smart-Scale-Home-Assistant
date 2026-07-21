@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a Weight Coach",
+        "description": "Pick the weight sensor to coach against — e.g. a Medisana BLE Scale weight sensor. One Weight Coach is set up per person.",
+        "data": {
+          "source_entity_id": "Weight sensor"
+        }
+      },
+      "profile": {
+        "title": "Profile",
+        "description": "Used for the BMR/TDEE calorie math. Prefilled from the weight sensor if it already reports these.",
+        "data": {
+          "gender": "Sex",
+          "age": "Age",
+          "height_cm": "Height (cm)"
+        }
+      },
+      "goal_type": {
+        "title": "Goal",
+        "data": {
+          "goal_type": "Goal type"
+        }
+      },
+      "goal_details": {
+        "title": "Goal details",
+        "description": "Current weight is {start_weight} kg.",
+        "data": {
+          "goal_weight_kg": "Goal weight (kg)",
+          "goal_rate_kg_week": "Target weekly rate (kg/week)",
+          "milestone_count": "Number of milestones along the way"
+        }
+      },
+      "activity": {
+        "title": "Activity level",
+        "description": "Prefilled with a guess from the weight sensor's activity attribute if present — adjust if it doesn't match your real activity level.",
+        "data": {
+          "activity_level": "Activity level"
+        }
+      }
+    },
+    "error": {
+      "source_unavailable": "Could not read a current value from that sensor.",
+      "goal_must_be_below_start": "Goal weight must be below your current weight for a loss goal.",
+      "goal_must_be_above_start": "Goal weight must be above your current weight for a gain goal."
+    }
+  }
+}
