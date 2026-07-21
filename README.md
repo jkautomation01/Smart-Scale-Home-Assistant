@@ -31,10 +31,13 @@ The protocol itself (characteristic UUIDs, byte layouts) is not officially
 documented by Medisana. It comes from the [keptenkurk/BS440][bs440] reverse
 engineering project, which [bwynants/weegschaal][weegschaal] (the repo this
 was requested from) also builds on for its ESPHome component. Both projects
-confirm BS430, BS440, BS444 and BS550. **The BS436 is not independently
-confirmed** — it's very likely the same protocol family, but see
-[Verifying your BS436](#verifying-your-bs436-or-troubleshooting) below before
-trusting the numbers.
+confirm BS430, BS440, BS444 and BS550. **The BS436 has now been confirmed
+working** against a real device — weight and body-composition readings
+match what the scale itself shows. One protocol difference from
+BS410/BS444: the **BS436 does not use the 2010-01-01 clock offset** —
+leave "Scale clock uses 2010-01-01 epoch" turned **off** in the
+integration's options, or the `measured_at` attribute will show a date
+decades in the future.
 
 ## Installation
 
@@ -71,8 +74,16 @@ Copy `custom_components/medisana_ble/` into your Home Assistant
    %**, **Muscle Mass %**, **Bone Mass**, **Metabolic Rate (kcal)**. Gender,
    age, height and activity level (as configured on the scale) are exposed
    as attributes on the Weight sensor.
+5. On a **BS436**, turn **off** "Scale clock uses 2010-01-01 epoch" in the
+   same options dialog (it's on by default for the wider BS4xx family, but
+   the BS436 uses a plain Unix timestamp — leaving it on shows the
+   `measured_at` attribute 40 years in the future).
+6. New entities aren't added to any dashboard automatically. Find them under
+   **Settings → Devices & Services → Medisana BLE Scale**, or search for the
+   scale's title (e.g. "BS436") in **Settings → Entities**, then add them to
+   a dashboard/area as you would any other sensor.
 
-## Verifying your BS436 (or troubleshooting)
+## Troubleshooting
 
 Turn on debug logging:
 
@@ -89,13 +100,15 @@ payload with `6f`, and a person payload with `84` — if you see those marker
 bytes and the resulting `Weight`/`Body Fat`/etc. sensor values in Home
 Assistant roughly match what the scale itself displays, the protocol is
 confirmed compatible. If the numbers are off by a large, consistent factor,
-or timestamps look wrong, most likely culprit is the epoch offset — toggle
-"Scale clock uses 2010-01-01 epoch" in the integration's options.
+or the `measured_at` attribute looks decades off, toggle "Scale clock uses
+2010-01-01 epoch" in the integration's options (see the BS436 note above).
 
 If nothing ever shows up: the scale only advertises for a short window after
 a weigh-in, and Home Assistant's Bluetooth proxy/adapter needs to be in
 range *at that moment* — walk to the scale, weigh in, and check the log
-within the next ~30 seconds.
+within the next ~30 seconds. Also double check you're actually looking at
+the right entities (see step 6 above) — a successful reading updates the
+sensors silently, it doesn't notify you.
 
 ## Credits
 
