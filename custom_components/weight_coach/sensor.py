@@ -24,18 +24,19 @@ async def async_setup_entry(
 ) -> None:
     """Set up Weight Coach sensors."""
     coordinator: WeightCoachCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            TrendWeightSensor(coordinator, entry),
-            ActualRateSensor(coordinator, entry),
-            ProjectedEndDateSensor(coordinator, entry),
-            NextMilestoneSensor(coordinator, entry),
-            TdeeSensor(coordinator, entry),
-            ActiveTargetSensor(coordinator, entry),
-            SuggestedTargetSensor(coordinator, entry),
-            DaysUntilCheckinSensor(coordinator, entry),
-        ]
-    )
+    entities: list[WeightCoachSensorBase] = [
+        TrendWeightSensor(coordinator, entry),
+        ActualRateSensor(coordinator, entry),
+        ProjectedEndDateSensor(coordinator, entry),
+        NextMilestoneSensor(coordinator, entry),
+        TdeeSensor(coordinator, entry),
+        ActiveTargetSensor(coordinator, entry),
+        SuggestedTargetSensor(coordinator, entry),
+        DaysUntilCheckinSensor(coordinator, entry),
+    ]
+    if coordinator.metabolic_source_entity_id:
+        entities.append(RawMetabolicRateSensor(coordinator, entry))
+    async_add_entities(entities)
 
 
 class WeightCoachSensorBase(SensorEntity):
@@ -85,8 +86,11 @@ class TrendWeightSensor(WeightCoachSensorBase):
         return round(value, 2) if value is not None else None
 
     @property
-    def extra_state_attributes(self) -> dict[str, str | None]:
-        return {"last_reading_source": self._coordinator.last_reading_source}
+    def extra_state_attributes(self) -> dict[str, object]:
+        return {
+            "last_reading_source": self._coordinator.last_reading_source,
+            "history": self._coordinator.weight_history,
+        }
 
 
 class ActualRateSensor(WeightCoachSensorBase):
@@ -180,6 +184,10 @@ class ActiveTargetSensor(WeightCoachSensorBase):
     def native_value(self) -> float | None:
         return self._coordinator.active_target_kcal
 
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return {"history": self._coordinator.target_history}
+
 
 class SuggestedTargetSensor(WeightCoachSensorBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -221,3 +229,26 @@ class DaysUntilCheckinSensor(WeightCoachSensorBase):
     def extra_state_attributes(self) -> dict[str, str | None]:
         next_checkin = self._coordinator.next_checkin_date
         return {"next_checkin_date": next_checkin.isoformat() if next_checkin else None}
+
+
+class RawMetabolicRateSensor(WeightCoachSensorBase):
+    """The scale's own raw metabolic-rate reading, if a source is configured.
+
+    Only added when coordinator.metabolic_source_entity_id is set (see
+    async_setup_entry above) - no point creating an always-empty entity.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "kcal"
+    _attr_icon = "mdi:fire"
+
+    def __init__(self, coordinator: WeightCoachCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "raw_metabolic_rate", "Raw Metabolic Rate")
+
+    @property
+    def native_value(self) -> float | None:
+        return self._coordinator.latest_metabolic_kcal
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return {"history": self._coordinator.metabolic_history}

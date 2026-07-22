@@ -7,6 +7,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import UnitOfMass
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 from homeassistant.util.unit_conversion import MassConverter
@@ -20,6 +21,7 @@ from .const import (
     CONF_GOAL_TYPE,
     CONF_GOAL_WEIGHT,
     CONF_HEIGHT_CM,
+    CONF_METABOLIC_SOURCE_ENTITY,
     CONF_MILESTONE_COUNT,
     CONF_SOURCE_ENTITY,
     CONF_START_WEIGHT,
@@ -73,6 +75,10 @@ class WeightCoachConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     self._data[CONF_SOURCE_ENTITY] = source_entity_id
                     self._data[CONF_START_WEIGHT] = start_weight_kg
+                    if user_input.get(CONF_METABOLIC_SOURCE_ENTITY):
+                        self._data[CONF_METABOLIC_SOURCE_ENTITY] = user_input[
+                            CONF_METABOLIC_SOURCE_ENTITY
+                        ]
                     self._prefill = dict(state.attributes)
                     return await self.async_step_profile()
 
@@ -82,6 +88,9 @@ class WeightCoachConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_SOURCE_ENTITY): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor", device_class="weight")
+                    ),
+                    vol.Optional(CONF_METABOLIC_SOURCE_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
                     ),
                 }
             ),
@@ -203,3 +212,44 @@ class WeightCoachConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
         )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> WeightCoachOptionsFlow:
+        """Get the options flow for this handler."""
+        return WeightCoachOptionsFlow()
+
+
+class WeightCoachOptionsFlow(config_entries.OptionsFlow):
+    """Lets an existing entry attach/change a metabolic-rate source sensor.
+
+    Kept deliberately to this one field - unlike deleting and re-adding the
+    integration (which mints a new entry_id and loses all accumulated Store
+    history), an options-flow reload keeps the same entry_id/Store, so this
+    is the only safe way to add this after initial setup.
+    """
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        if user_input is not None:
+            options: dict[str, Any] = {}
+            if user_input.get(CONF_METABOLIC_SOURCE_ENTITY):
+                options[CONF_METABOLIC_SOURCE_ENTITY] = user_input[CONF_METABOLIC_SOURCE_ENTITY]
+            return self.async_create_entry(title="", data=options)
+
+        current = self.config_entry.options.get(
+            CONF_METABOLIC_SOURCE_ENTITY, self.config_entry.data.get(CONF_METABOLIC_SOURCE_ENTITY)
+        )
+        field = (
+            vol.Optional(CONF_METABOLIC_SOURCE_ENTITY, default=current)
+            if current
+            else vol.Optional(CONF_METABOLIC_SOURCE_ENTITY)
+        )
+        schema = vol.Schema(
+            {field: selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))}
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema)

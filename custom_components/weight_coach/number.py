@@ -121,6 +121,10 @@ class CaloriesConsumedTodayNumber(WeightCoachNumberBase):
     def native_value(self) -> float | None:
         return self._coordinator.get_intake_for_date(dt_util.now().date())
 
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return {"history": self._coordinator.intake_history}
+
     async def async_set_native_value(self, value: float) -> None:
         await self._coordinator.async_log_intake(value, day=dt_util.now().date())
 

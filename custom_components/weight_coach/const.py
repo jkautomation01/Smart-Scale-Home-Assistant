@@ -16,6 +16,7 @@ CONF_GOAL_RATE = "goal_rate_kg_week"
 CONF_MILESTONE_COUNT = "milestone_count"
 CONF_ACTIVITY_LEVEL = "activity_level"
 CONF_START_WEIGHT = "goal_start_weight_kg"
+CONF_METABOLIC_SOURCE_ENTITY = "metabolic_source_entity_id"
 
 GOAL_TYPE_LOSE = "lose"
 GOAL_TYPE_MAINTAIN = "maintain"
@@ -72,5 +73,10 @@ MAX_MILESTONE_COUNT = 10
 # Bounded local history: collapse to at most one entry per calendar day, and
 # hard-cap total entries so years of daily use stay a trivial amount of data.
 MAX_STORED_DAYS = 1095  # ~3 years
+
+# The *attribute* exposed for graphing is windowed separately/more tightly
+# than the full internal history above - a year is already generous for
+# "the whole journey" and keeps entity attribute payloads reasonable.
+HISTORY_ATTRIBUTE_MAX_DAYS = 365
 
 SIGNAL_WEIGHT_COACH_UPDATE = "weight_coach_update_{entry_id}"

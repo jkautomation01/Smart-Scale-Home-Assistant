@@ -153,12 +153,24 @@ One config entry per coached person.
   - **Otherwise**: falls back to comparing your actual trend rate against
     your goal rate and nudges the formula-based target accordingly. This is
     the always-available path - zero logged days still gets you sane advice.
+  - The suggestion only recalculates on a fixed **weekly check-in (Sunday)**
+    - it stays put the rest of the week so you're not chasing a moving
+      target off day-to-day noise. `sensor.*_days_until_checkin` counts down
+      to it. Changing your goal weight/rate/activity level is treated as a
+      deliberate decision and recalculates immediately instead of waiting.
   - Either way, a suggestion never auto-applies. Press **Accept Suggested
     Target** to make it the active target; that's also what the next
-    recalibration is measured against.
+    check-in's recalibration is measured against.
 - **Manual weight entry**: if the automatic weight sensor doesn't update for
   any reason (BLE connection failure, out of range, etc.), there's a
   fallback number entity that feeds the exact same trend/history pipeline.
+- **Graphing**: raw weight readings, the smoothed trend, logged calorie
+  intake, the scale's raw metabolic rate (if configured), and the calorie
+  target's change history are all available as a `history` attribute on the
+  relevant entity (see the table below) - a full time series, not just the
+  latest value, so a card that can read entity attributes (e.g.
+  [apexcharts-card][apexcharts]'s `data_generator`) can plot the whole
+  journey regardless of your recorder retention settings.
 
 ### Installation
 
@@ -170,7 +182,11 @@ restart Home Assistant.
 
 1. **Settings → Devices & Services → Add Integration → Weight Coach**.
 2. Pick the weight sensor to coach against (any `device_class: weight`
-   sensor - e.g. one of the Medisana BLE Scale sensors above).
+   sensor - e.g. one of the Medisana BLE Scale sensors above). Optionally
+   also pick a metabolic-rate sensor (e.g. the Medisana integration's
+   Metabolic Rate sensor) if you want its raw readings graphed too - this
+   can also be added later via **Configure** without losing history (see
+   below), so it's fine to skip for now.
 3. Confirm sex/age/height - prefilled automatically if the source sensor
    already reports them (the Medisana integration's Weight sensor does, as
    attributes).
@@ -178,6 +194,11 @@ restart Home Assistant.
    and how many milestones to split the journey into.
 5. Pick an activity level (prefilled with a guess if the source sensor
    reports one, always adjustable).
+
+To attach (or change) the metabolic-rate sensor later, use the integration's
+**Configure** button rather than deleting and re-adding it - re-adding mints
+a new entry and starts your history over from zero, while **Configure**
+reloads in place and keeps everything.
 
 ### Entities
 
@@ -188,20 +209,27 @@ restart Home Assistant.
 | `number.*_calories_consumed_today` | Log today's total calorie intake once, at day's end |
 | `number.*_manual_weight_entry` | Fallback weigh-in entry if the automatic sensor doesn't update |
 | `select.*_activity_level` | Sedentary → very active, drives the TDEE estimate |
-| `sensor.*_trend_weight` | Smoothed weight trend |
+| `sensor.*_trend_weight` | Smoothed weight trend. `history` attribute: raw + trend weight, one entry per weigh-in |
 | `sensor.*_actual_weekly_rate` | Real rate of change from the last ~3 weeks |
-| `sensor.*_projected_end_date` | Projected date to reach your goal weight |
+| `sensor.*_projected_end_date` | Projected date to reach your goal weight (goal-rate-based until there's enough history, then shifts onto your real trend) |
 | `sensor.*_next_milestone` | Next unreached milestone weight (full list + dates in attributes) |
 | `sensor.*_tdee_estimate` | Current TDEE estimate (`tdee_source` attribute shows formula vs. logged-intake) |
-| `sensor.*_active_calorie_target` | The calorie target you're currently following |
+| `sensor.*_active_calorie_target` | The calorie target you're currently following. `history` attribute: every change, when, and why |
 | `sensor.*_suggested_calorie_target` | What the coach currently recommends - press the button to adopt it |
+| `sensor.*_days_until_checkin` | Countdown to the next weekly (Sunday) recalculation of the suggested target |
+| `sensor.*_raw_metabolic_rate` | The scale's raw metabolic-rate reading, if a source is configured. `history` attribute: full series |
 | `button.*_accept_suggested_target` | Promotes the suggested target to active |
+
+`number.*_calories_consumed_today` also carries a `history` attribute with
+your full logged-intake series.
 
 ### Notes
 
-- Trend/rate/projection/milestone sensors read "unavailable" for the first
-  few days - there isn't enough history yet for a reliable trend or slope.
-  That's expected.
+- `sensor.*_actual_weekly_rate` reads "unavailable" for the first ~week -
+  there isn't enough history yet for a reliable regression slope. Projected
+  end date and milestone dates show a value from day one instead (based on
+  your goal's target rate), then shift onto your real trend once that
+  regression kicks in - a jump around that point is normal, not a bug.
 - The two-tier calorie system is intentionally forgiving: skip logging
   intake for a week and nothing breaks, it just keeps using the
   outcome-based fallback until enough days are logged again.
@@ -218,3 +246,4 @@ restart Home Assistant.
 [bs440]: https://github.com/keptenkurk/BS440
 [weegschaal]: https://github.com/bwynants/weegschaal
 [proxy]: https://esphome.io/components/bluetooth_proxy.html
+[apexcharts]: https://github.com/RomRider/apexcharts-card

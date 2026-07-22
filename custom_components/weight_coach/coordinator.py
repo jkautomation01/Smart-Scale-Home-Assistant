@@ -31,6 +31,7 @@ from .const import (
     CONF_GOAL_TYPE,
     CONF_GOAL_WEIGHT,
     CONF_HEIGHT_CM,
+    CONF_METABOLIC_SOURCE_ENTITY,
     CONF_MILESTONE_COUNT,
     CONF_SOURCE_ENTITY,
     CONF_START_WEIGHT,
@@ -38,6 +39,7 @@ from .const import (
     DEFAULT_MILESTONE_COUNT,
     DOMAIN,
     GOAL_TYPE_MAINTAIN,
+    HISTORY_ATTRIBUTE_MAX_DAYS,
     MAX_STORED_DAYS,
     MIN_LOGGED_DAYS,
     REGRESSION_WINDOW_DAYS,
@@ -71,6 +73,12 @@ class WeightCoachCoordinator:
         self.entry = entry
 
         self.source_entity_id: str = entry.data[CONF_SOURCE_ENTITY]
+        # Options (post-setup, via the options flow) take precedence over
+        # the initial config-entry data, so an existing entry can attach
+        # this later without losing its Store history.
+        self.metabolic_source_entity_id: str | None = entry.options.get(
+            CONF_METABOLIC_SOURCE_ENTITY, entry.data.get(CONF_METABOLIC_SOURCE_ENTITY)
+        )
         self.gender: str = entry.data[CONF_GENDER]
         self.age: int = entry.data[CONF_AGE]
         self.height_cm: float = entry.data[CONF_HEIGHT_CM]
@@ -89,6 +97,7 @@ class WeightCoachCoordinator:
 
         self._store: Store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}")
         self._readings: list[Reading] = []
+        self._metabolic_readings: list[Reading] = []
         self._intake_log: dict[str, float] = {}
         self._target_log: list[dict[str, Any]] = []
 
@@ -104,8 +113,10 @@ class WeightCoachCoordinator:
         self.last_reading_source: str | None = None
         self.next_checkin_date: date | None = None
         self.days_until_checkin: int | None = None
+        self.latest_metabolic_kcal: float | None = None
 
         self._unsub_state: Callable[[], None] | None = None
+        self._unsub_metabolic: Callable[[], None] | None = None
         self._unsub_daily: Callable[[], None] | None = None
 
     # ------------------------------------------------------------------ #
@@ -117,6 +128,10 @@ class WeightCoachCoordinator:
         self._unsub_state = async_track_state_change_event(
             self.hass, [self.source_entity_id], self._handle_source_event
         )
+        if self.metabolic_source_entity_id:
+            self._unsub_metabolic = async_track_state_change_event(
+                self.hass, [self.metabolic_source_entity_id], self._handle_metabolic_source_event
+            )
         self._unsub_daily = async_track_time_change(
             self.hass, self._handle_daily_tick, hour=0, minute=0, second=0
         )
@@ -125,6 +140,9 @@ class WeightCoachCoordinator:
         if self._unsub_state is not None:
             self._unsub_state()
             self._unsub_state = None
+        if self._unsub_metabolic is not None:
+            self._unsub_metabolic()
+            self._unsub_metabolic = None
         if self._unsub_daily is not None:
             self._unsub_daily()
             self._unsub_daily = None
@@ -140,6 +158,16 @@ class WeightCoachCoordinator:
                 )
                 for r in stored.get("readings", [])
             ]
+            self._metabolic_readings = [
+                # Reusing Reading for a kcal series too rather than adding a
+                # near-identical dataclass - .weight_kg just holds kcal here.
+                Reading(
+                    ts=datetime.fromisoformat(r["ts"]),
+                    weight_kg=r["kcal"],
+                    source=r.get("source", "sensor"),
+                )
+                for r in stored.get("metabolic_readings", [])
+            ]
             self._intake_log = dict(stored.get("intake_log", {}))
             self._target_log = list(stored.get("target_log", []))
             self.goal_weight_kg = stored.get("goal_weight_kg", self.goal_weight_kg)
@@ -151,6 +179,8 @@ class WeightCoachCoordinator:
                 if stored.get("next_checkin_date")
                 else None
             )
+            if self._metabolic_readings:
+                self.latest_metabolic_kcal = self._metabolic_readings[-1].weight_kg
         self._recompute()
         # Always persist after load: this may be a brand-new entry, or a
         # catch-up check-in that ran because HA was offline through a
@@ -168,6 +198,10 @@ class WeightCoachCoordinator:
             "readings": [
                 {"ts": r.ts.isoformat(), "weight_kg": r.weight_kg, "source": r.source}
                 for r in self._readings
+            ],
+            "metabolic_readings": [
+                {"ts": r.ts.isoformat(), "kcal": r.weight_kg, "source": r.source}
+                for r in self._metabolic_readings
             ],
             "intake_log": self._intake_log,
             "target_log": self._target_log,
@@ -236,6 +270,41 @@ class WeightCoachCoordinator:
         if len(pruned) > MAX_STORED_DAYS:
             pruned = pruned[-MAX_STORED_DAYS:]
         self._readings = pruned
+
+    @callback
+    def _handle_metabolic_source_event(self, event: Event) -> None:
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            return
+        try:
+            kcal = float(new_state.state)
+        except ValueError:
+            return
+        self.hass.async_create_task(
+            self.async_ingest_metabolic_reading(kcal),
+            f"weight_coach ingest metabolic {self.entry.entry_id}",
+        )
+
+    async def async_ingest_metabolic_reading(self, kcal: float, ts: datetime | None = None) -> None:
+        """Record a raw metabolic-rate reading from the (optional) second source.
+
+        Independent of the weight trend/check-in pipeline - just its own
+        light history bookkeeping for later graphing.
+        """
+        self._metabolic_readings.append(Reading(ts=ts or dt_util.utcnow(), weight_kg=kcal))
+        self._prune_metabolic_readings()
+        self.latest_metabolic_kcal = self._metabolic_readings[-1].weight_kg
+        self._async_save()
+        self._async_dispatch()
+
+    def _prune_metabolic_readings(self) -> None:
+        by_day: dict[date, Reading] = {}
+        for reading in sorted(self._metabolic_readings, key=lambda r: r.ts):
+            by_day[dt_util.as_local(reading.ts).date()] = reading
+        pruned = sorted(by_day.values(), key=lambda r: r.ts)
+        if len(pruned) > MAX_STORED_DAYS:
+            pruned = pruned[-MAX_STORED_DAYS:]
+        self._metabolic_readings = pruned
 
     async def async_log_intake(self, calories: float, day: date | None = None) -> None:
         """Log a day's total calorie intake. Re-logging the same day overwrites it."""
@@ -430,3 +499,74 @@ class WeightCoachCoordinator:
             )
 
         self.next_checkin_date = next_sunday_after(today)
+
+    # ------------------------------------------------------------------ #
+    # History, for graphing (see const.HISTORY_ATTRIBUTE_MAX_DAYS)
+    # ------------------------------------------------------------------ #
+
+    @property
+    def weight_history(self) -> list[dict[str, Any]]:
+        """Raw readings alongside the smoothed trend, one entry per reading.
+
+        Carries both series so a chart can plot raw scatter points against
+        the trend line from a single data source.
+        """
+        window_start = dt_util.now().date() - timedelta(days=HISTORY_ATTRIBUTE_MAX_DAYS)
+        trend_series = compute_trend_series(self._readings)
+        trend_by_ts = {point.ts: point.trend_kg for point in trend_series}
+        history: list[dict[str, Any]] = []
+        for reading in self._readings:
+            local_date = dt_util.as_local(reading.ts).date()
+            if local_date < window_start:
+                continue
+            history.append(
+                {
+                    "date": local_date.isoformat(),
+                    "raw_weight_kg": round(reading.weight_kg, 2),
+                    "trend_kg": round(trend_by_ts.get(reading.ts, reading.weight_kg), 2),
+                    "source": reading.source,
+                }
+            )
+        return history
+
+    @property
+    def metabolic_history(self) -> list[dict[str, Any]]:
+        """Raw metabolic-rate readings, if a source is configured."""
+        window_start = dt_util.now().date() - timedelta(days=HISTORY_ATTRIBUTE_MAX_DAYS)
+        return [
+            {"date": dt_util.as_local(reading.ts).date().isoformat(), "kcal": round(reading.weight_kg)}
+            for reading in self._metabolic_readings
+            if dt_util.as_local(reading.ts).date() >= window_start
+        ]
+
+    @property
+    def intake_history(self) -> list[dict[str, Any]]:
+        """Logged daily calorie intake."""
+        window_start = dt_util.now().date() - timedelta(days=HISTORY_ATTRIBUTE_MAX_DAYS)
+        return [
+            {"date": day_str, "kcal": kcal}
+            for day_str, kcal in sorted(self._intake_log.items())
+            if date.fromisoformat(day_str) >= window_start
+        ]
+
+    @property
+    def target_history(self) -> list[dict[str, Any]]:
+        """When the active calorie target changed, to what, and why."""
+        window_start = dt_util.now().date() - timedelta(days=HISTORY_ATTRIBUTE_MAX_DAYS)
+        history: list[dict[str, Any]] = []
+        for entry in self._target_log:
+            try:
+                ts = datetime.fromisoformat(entry["ts"])
+            except (KeyError, ValueError):
+                continue
+            local_date = dt_util.as_local(ts).date()
+            if local_date < window_start:
+                continue
+            history.append(
+                {
+                    "date": local_date.isoformat(),
+                    "kcal": entry.get("calories"),
+                    "reason": entry.get("reason"),
+                }
+            )
+        return history

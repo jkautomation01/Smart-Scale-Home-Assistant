@@ -5,7 +5,8 @@
         "title": "Add a Weight Coach",
         "description": "Pick the weight sensor to coach against — e.g. a Medisana BLE Scale weight sensor. One Weight Coach is set up per person.",
         "data": {
-          "source_entity_id": "Weight sensor"
+          "source_entity_id": "Weight sensor",
+          "metabolic_source_entity_id": "Metabolic rate sensor (optional)"
         }
       },
       "profile": {
@@ -44,6 +45,17 @@
       "source_unavailable": "Could not read a current value from that sensor.",
       "goal_must_be_below_start": "Goal weight must be below your current weight for a loss goal.",
       "goal_must_be_above_start": "Goal weight must be above your current weight for a gain goal."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Weight Coach options",
+        "description": "Attach a metabolic-rate sensor for graphing, without losing your existing history (unlike deleting and re-adding this integration).",
+        "data": {
+          "metabolic_source_entity_id": "Metabolic rate sensor (optional)"
+        }
+      }
     }
   }
 }
