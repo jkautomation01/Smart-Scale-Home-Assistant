@@ -137,6 +137,26 @@ def project_date(
     return today + timedelta(days=days)
 
 
+def effective_slope_kg_per_day(
+    actual_slope_kg_per_day: float | None, goal_rate_kg_week: float
+) -> float | None:
+    """The real regression slope if available, else the goal's own pace.
+
+    Lets projections show a sensible date from day one (based on the target
+    rate, from the starting weight) and then shift onto the real trend once
+    there's enough history for regression_slope_kg_per_day to return a value.
+    """
+    if actual_slope_kg_per_day is not None:
+        return actual_slope_kg_per_day
+    return goal_rate_kg_week / 7
+
+
+def next_sunday_after(day: date) -> date:
+    """The next Sunday strictly after `day` (never returns `day` itself)."""
+    days_ahead = (6 - day.weekday()) % 7 or 7  # date.weekday(): Mon=0 .. Sun=6
+    return day + timedelta(days=days_ahead)
+
+
 def compute_milestones(
     start_weight_kg: float,
     goal_weight_kg: float,

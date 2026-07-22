@@ -33,6 +33,7 @@ async def async_setup_entry(
             TdeeSensor(coordinator, entry),
             ActiveTargetSensor(coordinator, entry),
             SuggestedTargetSensor(coordinator, entry),
+            DaysUntilCheckinSensor(coordinator, entry),
         ]
     )
 
@@ -196,4 +197,27 @@ class SuggestedTargetSensor(WeightCoachSensorBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | None]:
-        return {"tdee_source": self._coordinator.tdee_source}
+        next_checkin = self._coordinator.next_checkin_date
+        return {
+            "tdee_source": self._coordinator.tdee_source,
+            "next_checkin_date": next_checkin.isoformat() if next_checkin else None,
+        }
+
+
+class DaysUntilCheckinSensor(WeightCoachSensorBase):
+    """Countdown to the weekly (Sunday) recalibration of the suggested target."""
+
+    _attr_native_unit_of_measurement = "d"
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coordinator: WeightCoachCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "days_until_checkin", "Days Until Check-in")
+
+    @property
+    def native_value(self) -> int | None:
+        return self._coordinator.days_until_checkin
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        next_checkin = self._coordinator.next_checkin_date
+        return {"next_checkin_date": next_checkin.isoformat() if next_checkin else None}

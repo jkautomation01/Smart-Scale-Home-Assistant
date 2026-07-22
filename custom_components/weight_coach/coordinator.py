@@ -51,8 +51,10 @@ from .trend import (
     compute_formula_tdee,
     compute_milestones,
     compute_trend_series,
+    effective_slope_kg_per_day,
     logged_intake_stats,
     next_milestone as trend_next_milestone,
+    next_sunday_after,
     project_date,
     regression_slope_kg_per_day,
     suggest_target,
@@ -100,6 +102,8 @@ class WeightCoachCoordinator:
         self.next_milestone: Milestone | None = None
         self.projected_end_date: date | None = None
         self.last_reading_source: str | None = None
+        self.next_checkin_date: date | None = None
+        self.days_until_checkin: int | None = None
 
         self._unsub_state: Callable[[], None] | None = None
         self._unsub_daily: Callable[[], None] | None = None
@@ -142,12 +146,18 @@ class WeightCoachCoordinator:
             self.goal_rate_kg_week = stored.get("goal_rate_kg_week", self.goal_rate_kg_week)
             self.activity_level = stored.get("activity_level", self.activity_level)
             self.active_target_kcal = stored.get("active_target_kcal")
+            self.next_checkin_date = (
+                date.fromisoformat(stored["next_checkin_date"])
+                if stored.get("next_checkin_date")
+                else None
+            )
         self._recompute()
-        if not stored or self.active_target_kcal != stored.get("active_target_kcal"):
-            # Either a brand-new entry, or _recompute() just seeded the
-            # initial active target - persist it now rather than leaving it
-            # only in memory until the next ingestion event.
-            self._async_save()
+        # Always persist after load: this may be a brand-new entry, or a
+        # catch-up check-in that ran because HA was offline through a
+        # scheduled Sunday (which advances next_checkin_date without
+        # necessarily changing active_target_kcal) - simplest to just always
+        # save rather than infer which fields changed.
+        self._async_save()
 
     def _async_save(self) -> None:
         self._store.async_delay_save(self._data_to_save, 10)
@@ -165,6 +175,9 @@ class WeightCoachCoordinator:
             "goal_rate_kg_week": self.goal_rate_kg_week,
             "activity_level": self.activity_level,
             "active_target_kcal": self.active_target_kcal,
+            "next_checkin_date": self.next_checkin_date.isoformat()
+            if self.next_checkin_date
+            else None,
         }
 
     @callback
@@ -245,19 +258,22 @@ class WeightCoachCoordinator:
 
     async def async_set_goal_weight(self, value: float) -> None:
         self.goal_weight_kg = value
-        self._recompute()
+        # A goal change is a deliberate plan change, not a noisy data point -
+        # reflect it in the suggestion immediately rather than waiting for
+        # the next scheduled Sunday check-in.
+        self._recompute(force_checkin=True)
         self._async_save()
         self._async_dispatch()
 
     async def async_set_goal_rate(self, value: float) -> None:
         self.goal_rate_kg_week = value
-        self._recompute()
+        self._recompute(force_checkin=True)
         self._async_save()
         self._async_dispatch()
 
     async def async_set_activity_level(self, value: str) -> None:
         self.activity_level = value
-        self._recompute()
+        self._recompute(force_checkin=True)
         self._async_save()
         self._async_dispatch()
 
@@ -302,9 +318,31 @@ class WeightCoachCoordinator:
     # Math
     # ------------------------------------------------------------------ #
 
-    def _recompute(self) -> None:
-        now = dt_util.utcnow()
+    def _recompute(self, force_checkin: bool = False) -> None:
+        """Refresh continuous status every call; the calorie-target
+        suggestion only on the weekly Sunday check-in (or when forced by a
+        deliberate goal/activity change - see the setters above)."""
         today = dt_util.now().date()
+        slope_kg_per_day = self._recompute_status(today)
+
+        checkin_due = (
+            self.next_checkin_date is None
+            or today >= self.next_checkin_date
+            or force_checkin
+        )
+        if checkin_due:
+            self._recompute_checkin(today, slope_kg_per_day)
+
+        self.days_until_checkin = max(0, (self.next_checkin_date - today).days)
+
+    def _recompute_status(self, today: date) -> float | None:
+        """Trend, actual rate, and date projections. Always runs.
+
+        Returns the raw regression slope (kg/day, or None if there isn't
+        enough history yet) for _recompute_checkin to use - projections use
+        an effective (goal-rate-fallback) slope instead, computed here.
+        """
+        now = dt_util.utcnow()
 
         trend_series = compute_trend_series(self._readings)
         if trend_series:
@@ -319,23 +357,38 @@ class WeightCoachCoordinator:
         )
         self.actual_rate_kg_week = slope_kg_per_day * 7 if slope_kg_per_day is not None else None
 
-        if self.goal_type == GOAL_TYPE_MAINTAIN or self.trend_kg is None:
+        if self.goal_type == GOAL_TYPE_MAINTAIN:
             self.projected_end_date = None
             self.milestones = []
             self.next_milestone = None
         else:
+            # Before there's enough regression data (or even any readings
+            # at all), project using the goal's own target rate from the
+            # starting weight, so there's a sensible date from day one. This
+            # shifts onto the real trend once regression_slope_kg_per_day
+            # starts returning a value.
+            anchor_weight = (
+                self.trend_kg if self.trend_kg is not None else self.goal_start_weight_kg
+            )
+            effective_slope = effective_slope_kg_per_day(slope_kg_per_day, self.goal_rate_kg_week)
             self.projected_end_date = project_date(
-                self.trend_kg, self.goal_weight_kg, slope_kg_per_day, today
+                anchor_weight, self.goal_weight_kg, effective_slope, today
             )
             self.milestones = compute_milestones(
                 self.goal_start_weight_kg,
                 self.goal_weight_kg,
                 self.milestone_count,
-                self.trend_kg,
-                slope_kg_per_day,
+                anchor_weight,
+                effective_slope,
                 today,
             )
             self.next_milestone = trend_next_milestone(self.milestones)
+
+        return slope_kg_per_day
+
+    def _recompute_checkin(self, today: date, slope_kg_per_day: float | None) -> None:
+        """TDEE + suggested calorie target. Only runs on a check-in day."""
+        now = dt_util.utcnow()
 
         weight_for_bmr = self.trend_kg if self.trend_kg is not None else self.goal_start_weight_kg
         bmr = compute_bmr(weight_for_bmr, self.height_cm, self.age, self.gender)
@@ -375,3 +428,5 @@ class WeightCoachCoordinator:
                     "goal_rate_kg_week": self.goal_rate_kg_week,
                 }
             )
+
+        self.next_checkin_date = next_sunday_after(today)
