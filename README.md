@@ -237,13 +237,56 @@ your full logged-intake series.
   stored in Home Assistant's own storage, not the recorder - so it survives
   regardless of your recorder retention settings.
 
+### Dashboard
+
+A ready-made "Weight Coach" Sections dashboard, styled from the
+[Catppuccin][catppuccin] Latte/Frappé palette, with six custom Lovelace cards
+in `www/custom_cards/weight-coach-cards/`:
+
+| Card | Shows |
+|---|---|
+| `weight-summary-card` | Hero tile - progress ring toward your goal, current trend weight, next milestone, check-in countdown |
+| `weight-trend-chart-card` | Smoothed trend line with gradient fill over raw weigh-ins, a goal-weight reference line, milestone markers |
+| `weight-milestones-card` | A stepped row of your milestones - reached, next, and upcoming |
+| `calorie-coach-card` | Active vs. suggested calorie target, where the suggestion comes from, one-tap accept |
+| `calorie-intake-card` | Quick daily calorie entry plus a 30-day bar chart colored by over/under target |
+| `weight-quick-actions-card` | Adjust goal weight, pace, activity level, or log a manual weigh-in |
+
+No build step - plain ES modules, no bundler or framework. Every card ships
+with a real `ha-form`-based GUI editor (no YAML required) and every entity
+reference is a configurable field, so the same cards work for any
+`weight_coach` config entry - just repoint the entity pickers if you add a
+second coached person.
+
+**Install**:
+
+1. Copy `www/custom_cards/weight-coach-cards/` into `config/www/custom_cards/`.
+2. Add each of the six card `.js` files as a **Dashboards → Resources**
+   entry (type: JavaScript Module), e.g. `/local/custom_cards/weight-coach-cards/weight-summary-card.js`.
+3. Create a new dashboard, set its view type to **Sections**, and add the
+   cards via **Edit Dashboard → Add Card** (they'll appear as "Weight
+   Summary", "Weight Trend Chart", etc.) - or via YAML using
+   `type: custom:<card-name>`. Point each card's entity fields at your own
+   `weight_coach` config entry's entities.
+4. Optional: set the view's theme to **Catppuccin Auto Latte Frappe** (or
+   any Catppuccin variant) if you have the [Catppuccin theme][catppuccin]
+   installed, for the intended look. The cards fall back to sensible
+   hex colors if it isn't.
+
+The cards read data straight off the entities and attributes documented
+above (`history` attributes for the charts, `all_milestones` for the
+milestone row) - no extra configuration needed beyond picking your
+entities.
+
 ## Credits
 
 - Medisana BLE protocol reverse-engineering: [keptenkurk/BS440][bs440]
 - ESPHome component the Medisana integration was requested to be based on:
   [bwynants/weegschaal][weegschaal]
+- Dashboard color palette: [Catppuccin][catppuccin]
 
 [bs440]: https://github.com/keptenkurk/BS440
 [weegschaal]: https://github.com/bwynants/weegschaal
+[catppuccin]: https://github.com/catppuccin/catppuccin
 [proxy]: https://esphome.io/components/bluetooth_proxy.html
 [apexcharts]: https://github.com/RomRider/apexcharts-card
