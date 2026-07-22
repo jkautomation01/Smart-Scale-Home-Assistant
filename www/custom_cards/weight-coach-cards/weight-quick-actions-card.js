@@ -38,11 +38,11 @@ class WeightQuickActionsCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 4;
+    return 5;
   }
 
   getLayoutOptions() {
-    return { grid_columns: 6, grid_rows: 4, grid_min_columns: 4 };
+    return { grid_columns: 6, grid_rows: 5, grid_min_columns: 4 };
   }
 
   static getStubConfig() {
