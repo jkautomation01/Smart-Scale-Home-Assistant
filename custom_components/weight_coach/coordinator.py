@@ -174,6 +174,9 @@ class WeightCoachCoordinator:
             self.goal_rate_kg_week = stored.get("goal_rate_kg_week", self.goal_rate_kg_week)
             self.activity_level = stored.get("activity_level", self.activity_level)
             self.active_target_kcal = stored.get("active_target_kcal")
+            self.tdee_estimate = stored.get("tdee_estimate")
+            self.suggested_target_kcal = stored.get("suggested_target_kcal")
+            self.tdee_source = stored.get("tdee_source")
             self.next_checkin_date = (
                 date.fromisoformat(stored["next_checkin_date"])
                 if stored.get("next_checkin_date")
@@ -209,6 +212,9 @@ class WeightCoachCoordinator:
             "goal_rate_kg_week": self.goal_rate_kg_week,
             "activity_level": self.activity_level,
             "active_target_kcal": self.active_target_kcal,
+            "tdee_estimate": self.tdee_estimate,
+            "suggested_target_kcal": self.suggested_target_kcal,
+            "tdee_source": self.tdee_source,
             "next_checkin_date": self.next_checkin_date.isoformat()
             if self.next_checkin_date
             else None,
